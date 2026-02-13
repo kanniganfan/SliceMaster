@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Upload, Wand2, Play, Pause, Scissors, Trash2, MousePointer2, Crop, RotateCw, Image as ImageIcon,
   Maximize, Minimize, Archive, X, RefreshCw, Eraser, Settings2, Wind, Replace,
-  Aperture, Undo2, Redo2, Settings, Sun, Moon, Languages
+  Aperture, Undo2, Redo2, Settings, Sun, Moon, Languages, Merge
 } from 'lucide-react';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent
@@ -304,6 +304,44 @@ export default function App() {
       tl.fromTo(langTextRef.current, { y: 20, opacity: 0, filter: "blur(4px)" }, { y: 0, opacity: 1, filter: "blur(0px)", duration: 0.3, ease: "power2.out" });
   };
 
+  const handleMergeSelected = async () => {
+    if (selectedFrameIds.size < 2 || !image) return;
+    const selectedFrames = frames.filter(f => selectedFrameIds.has(f.id));
+    if (selectedFrames.length < 2) return;
+    
+    // Calculate Union Rect
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    selectedFrames.forEach(f => {
+      minX = Math.min(minX, f.x);
+      minY = Math.min(minY, f.y);
+      maxX = Math.max(maxX, f.x + f.width);
+      maxY = Math.max(maxY, f.y + f.height);
+    });
+    
+    const unionRect = { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+    const newImageData = await cropFrame(image.url, unionRect);
+    
+    const newFrame: Frame = {
+      id: uuidv4(),
+      order: selectedFrames[0].order,
+      ...unionRect,
+      imageData: newImageData
+    };
+    
+    // Calculate where to insert (at the position of the first selected item)
+    // We sort selected frames by their current index to find the "first" appearance
+    const sortedIndices = selectedFrames.map(f => frames.findIndex(curr => curr.id === f.id)).sort((a,b) => a - b);
+    const insertIndex = sortedIndices[0];
+    
+    // Create new list: Remove selected, insert new one
+    const remainingFrames = frames.filter(f => !selectedFrameIds.has(f.id));
+    remainingFrames.splice(insertIndex, 0, newFrame);
+    
+    setContextMenu(null);
+    commitFrames(remainingFrames);
+    setSelectedFrameIds(new Set([newFrame.id]));
+  };
+
   const handleGenerateRotation = async () => {
       let sourceFrame = frames.find(f => f.id === lastSelectedId) || frames.find(f => f.id === Array.from(selectedFrameIds)[0]);
       if (!sourceFrame?.imageData) return;
@@ -472,6 +510,12 @@ export default function App() {
                     <span>Action</span>
                     <button onClick={() => setContextMenu(null)}><X size={12}/></button>
                 </div>
+                {contextMenu.selectionSnapshot.size > 1 && (
+                    <button onClick={(e) => { e.stopPropagation(); handleMergeSelected(); }} 
+                        className="w-full text-left px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-700/50">
+                        <Merge size={16}/><span>{t('tools_merge', lang)}</span>
+                    </button>
+                )}
                 <button onClick={(e) => { e.stopPropagation(); if(contextMenu) { const ids = contextMenu.selectionSnapshot; setContextMenu(null); commitFrames(frames.filter(f => !ids.has(f.id))); setSelectedFrameIds(prev => { const n = new Set(prev); ids.forEach(id => n.delete(id)); return n; }); } }} 
                     className="w-full text-left px-4 py-2.5 text-sm text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-700 flex items-center gap-2">
                     <Trash2 size={16}/><span>{t('tools_delete', lang)}</span>
@@ -514,6 +558,9 @@ export default function App() {
                            <button onClick={() => setShowDetectSettings(!showDetectSettings)} className={`px-1.5 py-1.5 text-white hover:bg-white/10 ${showDetectSettings ? 'bg-white/20' : ''}`}><Settings size={14} /></button>
                        </div>
                        <div className="w-px h-6 bg-zinc-200 dark:bg-zinc-800 mx-1"></div>
+                       {selectedFrameIds.size > 1 && (
+                            <button onClick={handleMergeSelected} onMouseEnter={setupButtonHover} onMouseLeave={resetButtonHover} className="p-2 text-zinc-400 hover:text-blue-500" title={t('tools_merge', lang)}><Merge size={18}/></button>
+                       )}
                        <button onClick={() => setShowRotateModal(true)} onMouseEnter={setupButtonHover} onMouseLeave={resetButtonHover} disabled={isProcessing || selectedFrameIds.size === 0} className="p-2 text-zinc-400 hover:text-purple-500 disabled:opacity-30"><RefreshCw size={18}/></button>
                        <button onClick={() => setShowExportModal(true)} onMouseEnter={setupButtonHover} onMouseLeave={resetButtonHover} disabled={isProcessing || frames.length === 0} className="p-2 text-zinc-400 hover:text-emerald-500 disabled:opacity-30"><Archive size={18}/></button>
                        <button onClick={selectedFrameIds.size > 0 ? handleDeleteSelected : () => window.confirm(t('confirm_clear', lang)) && commitFrames([])} onMouseEnter={setupButtonHover} onMouseLeave={resetButtonHover} className={`p-2 ${selectedFrameIds.size > 0 ? 'text-red-500 hover:text-red-600' : 'text-zinc-400 hover:text-red-500'}`}><Trash2 size={18}/></button>

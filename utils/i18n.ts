@@ -1,3 +1,4 @@
+
 export type Lang = 'zh' | 'en';
 
 export const translations = {
@@ -14,6 +15,7 @@ export const translations = {
     tools_rotate: "旋转生成",
     tools_export: "导出",
     tools_delete: "删除选中",
+    tools_merge: "合并选区",
     tools_clear: "清空",
     empty_title: "拖入图片或点击上传",
     empty_desc: "支持 PNG, JPG (自动识别透明背景)",
@@ -78,6 +80,7 @@ export const translations = {
     tools_rotate: "Rotate Gen",
     tools_export: "Export",
     tools_delete: "Delete Selected",
+    tools_merge: "Merge Selected",
     tools_clear: "Clear All",
     empty_title: "Drag & Drop or Click to Upload",
     empty_desc: "Supports PNG, JPG (Auto transparency detection)",
