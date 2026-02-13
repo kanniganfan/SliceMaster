@@ -1,0 +1,5 @@
+{
+  "name": "智能帧动画切片工具",
+  "description": "一个用于自动识别、手动调整和排序帧动画序列的在线工具。支持智能去底识别与手动裁剪。",
+  "requestFramePermissions": []
+}
