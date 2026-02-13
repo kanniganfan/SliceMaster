@@ -5,7 +5,8 @@ import {
     Undo2, Redo2, Paintbrush, Sliders,
     ZoomIn, ZoomOut, Move
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import gsap from 'gsap';
+import { useGSAP } from '@gsap/react';
 import { floodFill, featherEdges } from '../utils/imageProcessor';
 import { t, Lang } from '../utils/i18n';
 
@@ -25,10 +26,52 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
   lang
 }) => {
   // Canvas Refs
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const canvasWrapperRef = useRef<HTMLDivElement>(null);
   const originalImageRef = useRef<HTMLImageElement | null>(null);
-  
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Interaction State
+  const [isExiting, setIsExiting] = useState(false);
+
+  // GSAP Entrance
+  useGSAP(() => {
+    const tl = gsap.timeline();
+    // Modal Entrance
+    tl.fromTo(rootRef.current, 
+        { scale: 0.9, opacity: 0, filter: "blur(10px)" },
+        { scale: 1, opacity: 1, filter: "blur(0px)", duration: 0.4, ease: "power3.out" }
+    );
+    // Tools Stagger
+    tl.from(".tool-btn", {
+        x: -20,
+        opacity: 0,
+        stagger: 0.05,
+        duration: 0.3,
+        ease: "back.out(1.2)"
+    }, "-=0.2");
+    
+  }, { scope: rootRef });
+
+  // Unified Exit Animation
+  const animateExit = (callback: () => void) => {
+      setIsExiting(true);
+      // Disable interaction to prevent double clicks during exit
+      if (rootRef.current) rootRef.current.style.pointerEvents = 'none';
+      
+      gsap.to(rootRef.current, {
+          scale: 0.95,
+          opacity: 0,
+          filter: "blur(10px)",
+          duration: 0.3,
+          ease: "power2.in",
+          onComplete: callback
+      });
+  };
+
+  const handleCloseAnim = () => animateExit(onClose);
+
   // History
   const historyRef = useRef<ImageData[]>([]);
   const [historyStep, setHistoryStep] = useState(-1);
@@ -59,7 +102,6 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
   const isDrawing = useRef(false);
   const lastDrawPos = useRef<{x: number, y: number} | null>(null);
 
-  // -- RE-IMPLEMENTING CORE LOGIC FOR CONTEXT --
    useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
         if (e.target instanceof HTMLInputElement) return;
@@ -86,7 +128,7 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
     const img = new Image(); img.crossOrigin = 'Anonymous'; img.src = imageSrc;
     img.onload = () => {
       originalImageRef.current = img;
-      const container = containerRef.current;
+      const container = canvasWrapperRef.current;
       if (container) {
           const availW = container.clientWidth - 64; const availH = container.clientHeight - 64;
           const scaleW = availW / img.width; const scaleH = availH / img.height;
@@ -121,7 +163,6 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
       else { setOffset(prev => ({ x: prev.x - e.deltaX, y: prev.y - e.deltaY })); }
   };
 
-  // ... (Tool Logic same as before) ...
   const getCanvasCoords = (clientX: number, clientY: number) => {
       const canvas = canvasRef.current; if (!canvas) return { x: 0, y: 0 };
       const rect = canvas.getBoundingClientRect();
@@ -130,10 +171,10 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
       return { x: Math.floor((clientX - rect.left) / scaleX), y: Math.floor((clientY - rect.top) / scaleY) };
   };
   const handlePointerDown = (e: React.PointerEvent) => {
-      if (activeTool === 'pan' || e.button === 1) { setIsPanning(true); startPan.current = { x: e.clientX - offset.x, y: e.clientY - offset.y }; containerRef.current?.setPointerCapture(e.pointerId); return; }
+      if (activeTool === 'pan' || e.button === 1) { setIsPanning(true); startPan.current = { x: e.clientX - offset.x, y: e.clientY - offset.y }; canvasWrapperRef.current?.setPointerCapture(e.pointerId); return; }
       const { x, y } = getCanvasCoords(e.clientX, e.clientY);
       if (activeTool === 'wand') handleWand(x, y);
-      else if (activeTool === 'eraser' || activeTool === 'restore') { isDrawing.current = true; drawBrush(x, y); lastDrawPos.current = { x, y }; containerRef.current?.setPointerCapture(e.pointerId); }
+      else if (activeTool === 'eraser' || activeTool === 'restore') { isDrawing.current = true; drawBrush(x, y); lastDrawPos.current = { x, y }; canvasWrapperRef.current?.setPointerCapture(e.pointerId); }
   };
   const handlePointerMove = (e: React.PointerEvent) => {
       setCursorPos({ x: e.clientX, y: e.clientY });
@@ -150,8 +191,8 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
       }
   };
   const handlePointerUp = (e: React.PointerEvent) => {
-      if (isPanning) { setIsPanning(false); containerRef.current?.releasePointerCapture(e.pointerId); } 
-      else if (isDrawing.current) { isDrawing.current = false; lastDrawPos.current = null; containerRef.current?.releasePointerCapture(e.pointerId); saveHistory(); }
+      if (isPanning) { setIsPanning(false); canvasWrapperRef.current?.releasePointerCapture(e.pointerId); } 
+      else if (isDrawing.current) { isDrawing.current = false; lastDrawPos.current = null; canvasWrapperRef.current?.releasePointerCapture(e.pointerId); saveHistory(); }
   };
   const handleWand = (x: number, y: number) => {
       setIsProcessing(true);
@@ -180,32 +221,32 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
       }
       ctx.restore();
   };
+
   const handleConfirm = () => {
       const canvas = canvasRef.current; if (!canvas) return;
       let finalData = canvas.toDataURL();
       if (globalFeather > 0) {
           const temp = document.createElement('canvas'); temp.width = canvas.width; temp.height = canvas.height;
           const tCtx = temp.getContext('2d');
-          if (tCtx) { tCtx.drawImage(canvas, 0, 0); const iData = tCtx.getImageData(0, 0, temp.width, temp.height); featherEdges(iData, globalFeather); tCtx.putImageData(iData, 0, 0); finalData = temp.toDataURL(); }
+          if (tCtx) { 
+              tCtx.drawImage(canvas, 0, 0); 
+              const iData = tCtx.getImageData(0, 0, temp.width, temp.height); 
+              featherEdges(iData, globalFeather); 
+              tCtx.putImageData(iData, 0, 0); 
+              finalData = temp.toDataURL(); 
+          }
       }
-      onConfirm(finalData);
+      // Animate Exit then Confirm
+      animateExit(() => onConfirm(finalData));
   };
 
   const getToolTitle = () => { switch(activeTool) { case 'wand': return t('tool_wand_short', lang); case 'eraser': return t('tool_eraser_short', lang); case 'restore': return t('tool_restore_short', lang); case 'pan': return t('tool_move', lang); }};
   const getToolDesc = () => { switch(activeTool) { case 'wand': return t('proc_wand_tip', lang); case 'eraser': case 'restore': return t('proc_brush_tip', lang); case 'pan': return t('proc_pan_tip', lang); }};
 
   return (
-    <motion.div 
+    <div 
+        ref={rootRef}
         className="fixed inset-0 z-50 bg-zinc-50 dark:bg-zinc-950 flex flex-col text-zinc-900 dark:text-zinc-100"
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ 
-            opacity: 0,
-            scale: 0.95,
-            filter: "blur(10px)",
-            transition: { duration: 0.3 }
-        }}
-        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
     >
       {/* 1. TOP BAR */}
       <div className="h-14 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 z-20 flex-shrink-0 shadow-sm">
@@ -217,16 +258,16 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
               </span>
               <div className="h-4 w-px bg-zinc-300 dark:bg-zinc-700"></div>
               <div className="flex items-center gap-1">
-                  <button onClick={undo} disabled={historyStep <= 0} className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white disabled:opacity-30 transition-smooth rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 btn-hover-lift"><Undo2 size={18} /></button>
-                  <button onClick={redo} disabled={historyStep >= historyRef.current.length - 1} className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white disabled:opacity-30 transition-smooth rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 btn-hover-lift"><Redo2 size={18} /></button>
+                  <button onClick={undo} disabled={historyStep <= 0} className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white disabled:opacity-30 transition-smooth rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"><Undo2 size={18} /></button>
+                  <button onClick={redo} disabled={historyStep >= historyRef.current.length - 1} className="p-2 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white disabled:opacity-30 transition-smooth rounded hover:bg-zinc-100 dark:hover:bg-zinc-800"><Redo2 size={18} /></button>
               </div>
           </div>
           <div className="flex items-center gap-2">
-             <button onMouseDown={() => setIsComparing(true)} onMouseUp={() => setIsComparing(false)} onMouseLeave={() => setIsComparing(false)} className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs rounded border border-zinc-200 dark:border-zinc-700 transition-smooth flex items-center gap-2 select-none btn-hover-lift">
+             <button onMouseDown={() => setIsComparing(true)} onMouseUp={() => setIsComparing(false)} onMouseLeave={() => setIsComparing(false)} className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs rounded border border-zinc-200 dark:border-zinc-700 transition-smooth flex items-center gap-2 select-none">
                 {isComparing ? <Eye size={14} /> : <EyeOff size={14} />} {t('proc_compare', lang)}
              </button>
-             <button onClick={onClose} className="px-4 py-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-smooth text-sm btn-hover-lift">{t('btn_cancel', lang)}</button>
-             <button onClick={handleConfirm} className="px-5 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded font-medium shadow-lg shadow-pink-900/20 dark:shadow-pink-900/40 text-sm flex items-center gap-2 transition-transform active:scale-95 btn-hover-lift"><Check size={16} /> {t('proc_finish', lang)}</button>
+             <button onClick={handleCloseAnim} className="px-4 py-1.5 text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-smooth text-sm">{t('btn_cancel', lang)}</button>
+             <button onClick={handleConfirm} className="px-5 py-1.5 bg-pink-600 hover:bg-pink-500 text-white rounded font-medium shadow-lg shadow-pink-900/20 dark:shadow-pink-900/40 text-sm flex items-center gap-2 active:scale-95 transition-transform"><Check size={16} /> {t('proc_finish', lang)}</button>
           </div>
       </div>
 
@@ -242,7 +283,7 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
 
         {/* 3. MAIN WORKSPACE */}
         <div 
-            ref={containerRef}
+            ref={canvasWrapperRef}
             className={`flex-1 relative overflow-hidden bg-zinc-50 dark:bg-zinc-950 checkerboard touch-none ${activeTool === 'pan' || isPanning ? 'cursor-grab active:cursor-grabbing' : 'cursor-none'}`}
             onWheel={handleWheel}
             onPointerDown={handlePointerDown}
@@ -256,7 +297,7 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
             </div>
 
             {/* Custom Cursor */}
-            {cursorPos && !isPanning && activeTool !== 'pan' && createPortal(
+            {cursorPos && !isPanning && activeTool !== 'pan' && !isExiting && createPortal(
                 <div className="fixed pointer-events-none z-[9999] flex items-center justify-center will-change-transform" style={{ left: cursorPos.x, top: cursorPos.y, transform: 'translate(-50%, -50%)' }}>
                     {activeTool === 'wand' && (
                         <div className="relative">
@@ -316,29 +357,56 @@ export const ImageProcessorModal: React.FC<ImageProcessorModalProps> = ({
             </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 };
 
-// ... UI Components (ToolButton, SettingSlider) remain same ...
+// ToolButton with GSAP hover
 const ToolButton = ({ icon, label, active, onClick, color = 'zinc' }: any) => {
+    const btnRef = useRef<HTMLButtonElement>(null);
+
+    const handleMouseEnter = () => {
+        if (btnRef.current) gsap.to(btnRef.current, { scale: 1.15, duration: 0.4, ease: "elastic.out(1, 0.3)" });
+    };
+    
+    const handleMouseLeave = () => {
+        if (btnRef.current) gsap.to(btnRef.current, { scale: 1, duration: 0.2, ease: "power2.out" });
+    };
+
     const activeClass = {
         blue: 'bg-blue-50 dark:bg-blue-600/20 text-blue-600 dark:text-blue-400 border-l-2 border-blue-500',
         red: 'bg-red-50 dark:bg-red-600/20 text-red-600 dark:text-red-400 border-l-2 border-red-500',
         emerald: 'bg-emerald-50 dark:bg-emerald-600/20 text-emerald-600 dark:text-emerald-400 border-l-2 border-emerald-500',
         zinc: 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white'
     }[color as string] || 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-white';
+    
     return (
-        <button onClick={onClick} className={`w-10 h-10 flex items-center justify-center rounded transition-all duration-200 group relative btn-hover-lift ${active ? activeClass : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
+        <button 
+            ref={btnRef}
+            onClick={onClick} 
+            onMouseEnter={handleMouseEnter}
+            onMouseLeave={handleMouseLeave}
+            className={`tool-btn w-10 h-10 flex items-center justify-center rounded transition-colors duration-200 group relative ${active ? activeClass : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+        >
             {icon}
             <span className="absolute left-full ml-2 px-2 py-1 bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs rounded border border-zinc-200 dark:border-zinc-700 opacity-0 group-hover:opacity-100 whitespace-nowrap z-50 pointer-events-none transition-opacity shadow-lg">{label}</span>
         </button>
     );
 };
-const SettingSlider = ({ label, value, min, max, step = 1, onChange, color, subLabel }: any) => (
-    <div>
-        <div className="flex justify-between text-xs text-zinc-500 dark:text-zinc-400 mb-2 font-medium"><span>{label}</span><span className="text-zinc-900 dark:text-zinc-200">{value}</span></div>
-        <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className={`w-full h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-${color}-500 hover:accent-${color}-400 transition-all`} />
-        {subLabel && <p className="text-[10px] text-zinc-400 dark:text-zinc-600 mt-1">{subLabel}</p>}
-    </div>
-);
+
+const SettingSlider = ({ label, value, min, max, step = 1, onChange, color, subLabel }: any) => {
+    const accentClass = {
+        blue: 'accent-blue-500 hover:accent-blue-400',
+        red: 'accent-red-500 hover:accent-red-400',
+        emerald: 'accent-emerald-500 hover:accent-emerald-400',
+        pink: 'accent-pink-500 hover:accent-pink-400',
+    }[color as string] || 'accent-zinc-500 hover:accent-zinc-400';
+
+    return (
+        <div>
+            <div className="flex justify-between text-xs text-zinc-500 dark:text-zinc-400 mb-2 font-medium"><span>{label}</span><span className="text-zinc-900 dark:text-zinc-200">{value}</span></div>
+            <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className={`w-full h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer ${accentClass} transition-all`} />
+            {subLabel && <p className="text-[10px] text-zinc-400 dark:text-zinc-600 mt-1">{subLabel}</p>}
+        </div>
+    );
+};
